@@ -17,6 +17,7 @@
 #include <windows.h>
 #else
 #include <fcntl.h>
+#include <signal.h>
 #include <spawn.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -27,6 +28,22 @@ GameProcess::~GameProcess() {
     if (waiter_.joinable()) {
         waiter_.detach();
     }
+}
+
+// Asks the game to end: a signal (its window closing is one too), so that it saves what it keeps on the way out
+bool GameProcess::stop() {
+    if (!running_ || process_ == 0) {
+        return false;
+    }
+#if defined(__ANDROID__)
+    return false;  // (the game is an activity of the app: left from it)
+#elif defined(_WIN32)
+    // (a console window's close would be kinder, but the game has none: terminated, as a closed window leaves it)
+    HANDLE handle = reinterpret_cast<HANDLE>(process_);
+    return TerminateProcess(handle, 0) != 0;
+#else
+    return ::kill(static_cast<pid_t>(process_), SIGTERM) == 0;
+#endif
 }
 
 #if defined(__ANDROID__)
@@ -89,6 +106,7 @@ bool GameProcess::start(const std::filesystem::path& program, const std::vector<
         return false;
     }
     running_ = true;
+    process_ = 0;  // (the activity's: the app's own, stopped another way)
     waiter_ = std::thread([this] {
         JNIEnv* env = static_cast<JNIEnv*>(SDL_GetAndroidJNIEnv());  // (SDL attaches the thread)
         jint result = kStillRunning;
@@ -177,6 +195,7 @@ bool GameProcess::start(const std::filesystem::path& program, const std::vector<
         return false;
     }
     running_ = true;
+    process_ = pid;
     waiter_ = std::thread([this, pid] {
         int status = 0;
         waitpid(pid, &status, 0);
@@ -285,6 +304,7 @@ bool GameProcess::start(const std::filesystem::path& program, const std::vector<
     CloseHandle(process.hThread);
     running_ = true;
     HANDLE handle = process.hProcess;
+    process_ = reinterpret_cast<long long>(handle);
     waiter_ = std::thread([this, handle] {
         WaitForSingleObject(handle, INFINITE);
         DWORD code = 0;
