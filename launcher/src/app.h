@@ -265,9 +265,12 @@ private:
     void set_online_on(bool on, size_t which);
     // The game online play is on for, if it is one of this launcher's and can be played (slots_.size(): none)
     size_t online_game() const;
-    // (the game's ask, in the file it writes when an invitation is accepted: the match to join; it quits, and the
-    // launcher starts it again joining that match)
-    bool take_join_request(size_t* which, std::string* code);
+    // (the invitation the game left for this launcher: online-invite, the game the switch was on for and the match
+    // to join, taken off the folder when read)
+    bool take_invitation(size_t* which, std::string* code, std::string* from, std::string* title);
+    // Asks the player, with the system's own dialog, about the invitation the game left, and starts the match if they
+    // take it (the game is stopped first: it saves what it keeps on the way out)
+    void answer_invitations();
     void write_online_state();
     std::filesystem::path online_state_path() const;
     // A launcher of one game: its sidebar's pages in order, each a port's own page (its place in Description::pages) or
@@ -381,7 +384,11 @@ private:
     std::vector<std::string> room_answered_;
     std::string room_id_;             // ([online] id: what the service knows the player by, made from the secret once)
     std::string online_state_;        // (the state file as last written: written again only when it differs)
-    char online_join_code_[16] = {};  // (an accepted invitation's match, once the game has quit)
+    struct PendingJoin {
+        size_t which = static_cast<size_t>(-1);
+        std::string code;
+    };
+    PendingJoin pending_join_;        // (an invitation taken while the game ran: joined when it has stopped)
 #ifdef LAUNCHER_UPDATE_REPO
     std::unique_ptr<launcher::Updater> updater_;
     bool relaunched_ = false;  // (the new version has been started: this one quits)
