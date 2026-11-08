@@ -1758,41 +1758,40 @@ void App::sidebar(float height) {
     }
     in_sidebar_ = in_sidebar;
     focus_seen_ = focused;
-    // The foot of the sidebar: online play (the player's id, and the switch), for the game of the page shown, or for
-    // the one it is on for while another page is shown; then the disclaimer
+    // The foot of the sidebar: online play (the player's id, and the switch that creates a match), then the disclaimer.
+    // The switch is for a game: the one whose page is shown, else the one it was last on for, so that it works from
+    // the Games list too; with neither, it says which to choose.
     if (room_url() && slots_.size() > 0) {
         const size_t on_for = online_game();
-        const size_t target = shown_kind == Page::Title ? shown_game : on_for;
+        const size_t target = shown_kind == Page::Title || shown_kind == Page::Series ? shown_game : on_for;
         const bool on = online_on() && on_for < slots_.size();
+        const bool ready = target < slots_.size() && slots_[target]->about->online.host_argument &&
+                           (can_play(target) || slots_[target]->game.running());
         const float foot = height - px(104);
         ImGui::SetCursorScreenPos(origin + ImVec2(px(24), foot));
         const std::string id = room_id();
         const std::string label = id.empty() ? std::string("Online ID: …") : "Online ID " + id;
         ui::text(label.c_str(), Font::Regular, ui::size::kSmall, p.tertiary, px(inner));
-        // (the switch: on starts the game of the page shown hosting a match, and keeps this player in the waiting room
-        // from any page)
+        // (the switch: on hosts a match in that game, and keeps this player in the waiting room from any page, so that
+        // an invitation reaches them playing it)
         ImGui::SetCursorScreenPos(origin + ImVec2(px(24), foot + px(18)));
-        bool switched = false;
-        if (ui::toggle("##sidebar_online", on)) {
-            switched = true;
-        }
+        // (a greyed switch with nothing to host in: it takes the press and does nothing)
+        const bool pressed = ui::toggle("##sidebar_online", on && ready);
+        const bool switched = pressed && ready;
         ImGui::SameLine(0.0f, px(8));
-        ui::text("Online play", Font::Regular, ui::size::kSmall, on ? p.accent : p.tertiary, px(inner) - px(40));
+        ui::text(ready ? "Online play" : "Online: choose a game first", Font::Regular, ui::size::kSmall,
+                 on ? p.accent : ready ? p.tertiary : p.tertiary, px(inner) - px(46));
         if (switched) {
             if (on) {
                 // (off: the game, if it is the one running, leaves the room and stops hosting by itself: it reads the
                 // state file)
                 set_online_on(false, on_for < slots_.size() ? on_for : target);
-            } else if (target < slots_.size()) {
-                if (slots_[target]->game.running()) {
-                    // (already playing: the switch alone starts the hosting, from the state file)
-                    set_online_on(true, target);
-                } else if (can_play(target)) {
-                    set_online_on(true, target);
-                    if (slots_[target]->about->online.host_argument) {
-                        play(target, host_arguments(slots_[target]->about->online));
-                    }
-                }
+            } else if (slots_[target]->game.running()) {
+                // (already playing: the switch alone starts the hosting, from the state file)
+                set_online_on(true, target);
+            } else if (can_play(target)) {
+                set_online_on(true, target);
+                play(target, host_arguments(slots_[target]->about->online));
             }
         }
     }
