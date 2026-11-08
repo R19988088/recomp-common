@@ -401,8 +401,10 @@ int play_directly(const std::string& id, const std::vector<std::string>& extra) 
     }
     std::filesystem::create_directories(target->folder / "logs", error);
     std::vector<std::string> arguments = arguments_for(prefs, *target);
-    // (the online switch on for this game: it hosts from here too, as from Play, so a Steam shortcut starts a match)
-    if (prefs.get("online", "on") == "1" && about.online.host_argument && prefs.get("online", "on_game") == id) {
+    // (the online switch on: it hosts from here too, as from Play, so a Steam shortcut starts a match. The switch is
+    // for the game it names; with none named yet, it is for the first game played)
+    const std::string switch_game = prefs.get("online", "on_game");
+    if (prefs.get("online", "on") == "1" && about.online.host_argument && (switch_game.empty() || switch_game == id)) {
         std::vector<std::string> online = {about.online.host_argument};
         if (about.online.name_argument && !prefs.get("online", "name").empty()) {
             if (about.online.lobby && about.online.list_argument) {
@@ -2299,7 +2301,8 @@ std::vector<std::string> App::online_arguments(size_t which) const {
         return {};
     }
     const size_t on_for = online_game();
-    // (the switch is for the game it names: another game played meanwhile is played as usual)
+    // (the switch is for the game it names; with none named yet, it is for the first game played, which then becomes
+    // the one it is for)
     if (on_for < slots_.size() && on_for != which) {
         return {};
     }
