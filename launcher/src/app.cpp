@@ -201,7 +201,7 @@ const launcher::Description& the_description() {
 // Who a game is, as the launcher keeps it: a port's one game, or one of a collection's.
 struct Target {
     const launcher::Description* about = nullptr;
-    std::string id, name, exe, series, file_section = "game", video_section = "video";
+    std::string id, name, exe, series, rom_set, file_section = "game", video_section = "video";
     std::filesystem::path folder;
 };
 
@@ -217,6 +217,7 @@ std::vector<Target> targets() {
             target.name = game.name;
             target.exe = game.exe;
             target.series = game.series ? game.series : "";
+            target.rom_set = game.rom_set ? game.rom_set : "";
             target.file_section = std::string("game.") + game.id;
             target.video_section = std::string("video.") + game.id;
             const char* own = game.home_env && *game.home_env ? std::getenv(game.home_env) : nullptr;
@@ -445,6 +446,10 @@ App::App(SDL_Window* window)
       program_folder_(base_path()),
       about_(the_description()) {
     prefs_.load();
+    // (the Games page's pictures: kept in the launcher's own folder, fetched once each)
+    if (collection_ && collection_->art_url && *collection_->art_url) {
+        art_ = std::make_unique<launcher::Art>(window_, folder_, collection_->art_url);
+    }
     // (controllers SDL doesn't know: gamecontrollerdb.txt beside the launcher or in its folder, as the game reads it)
     recomp::AddGamepadMappings({program_folder_, folder_});
     for (const Target& target : targets()) {
@@ -454,6 +459,7 @@ App::App(SDL_Window* window)
         slot->name = target.name;
         slot->exe = target.exe;
         slot->series = target.series;
+        slot->rom_set = target.rom_set;
         slot->file_section = target.file_section;
         slot->video_section = target.video_section;
         slot->folder = target.folder;
@@ -543,6 +549,10 @@ App::~App() {
     if (finder_.joinable()) {
         finder_.join();
     }
+    // (the pictures' textures are the renderer's, which goes after this)
+    if (art_) {
+        art_->close();
+    }
 }
 
 bool App::busy() const {
@@ -561,7 +571,7 @@ bool App::busy() const {
         return true;
     }
 #endif
-    return finding_ || any_running();
+    return finding_ || any_running() || (art_ && art_->working());
 }
 
 bool App::ready_for_keys() const {
@@ -3118,8 +3128,12 @@ void App::library_page(float width) {
     ui::gap(24);
     ui::text("GAMES", Font::Semibold, ui::size::kDetail, p.secondary);
     ui::gap(10);
-    Card games(width);
-    bool first = true;
+    // (the games as tiles: a picture, its name, and its archive's name; three to a row, two or four as the window is
+    // narrow or wide: the page's width is what decides it)
+    const int columns = width < px(520) ? 2 : width >= px(760) ? 4 : 3;
+    const float tile_gap = px(20);
+    const float tile_width = std::floor((width - tile_gap * static_cast<float>(columns - 1)) / static_cast<float>(columns));
+    const float art_height = std::floor(tile_width * 224.0f / 384.0f);  // (a CPS-2 screen's shape)
     // Only the games the player has, for one who plays one or two of them (once one is set up)
     if (!titled().empty()) {
         const bool only = installed_only();
@@ -3137,7 +3151,7 @@ void App::library_page(float width) {
                 prefs_.save();
             }
         });
-        first = false;
+        ui::gap(px(16));
     }
     // (a series' games under its name, where two or more of them are on the page)
     std::map<std::string, int> in_series;
@@ -3145,68 +3159,52 @@ void App::library_page(float width) {
         in_series[slots_[which]->series] += shown(which) ? 1 : 0;
     }
     std::string series;
+    int column = 0;
+    bool any = false;
     for (size_t which : order_) {
         Slot& one = *slots_[which];
         if (!shown(which)) {
             continue;  // (not in this build, or not set up and left out)
         }
-        if (!first) {
-            inset_separator(width);
-        }
-        first = false;
         if (one.series != series && !one.series.empty() && in_series[one.series] > 1) {
-            ImVec2 at = ImGui::GetCursorScreenPos();
-            ImGui::SetCursorScreenPos(at + ImVec2(px(18), px(14)));
+            // (a new series: its name over its games, and a row of its own)
+            if (column > 0) {
+                ui::gap(px(18));
+                column = 0;
+            } else if (any) {
+                ui::gap(px(18));
+            }
             std::string heading = one.series;
             std::transform(heading.begin(), heading.end(), heading.begin(), [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
             ui::text(heading.c_str(), Font::Semibold, ui::size::kSmall, p.secondary);
-            ImGui::SetCursorScreenPos(ImVec2(at.x, ImGui::GetCursorScreenPos().y - px(8)));
+            ui::gap(px(10));
         }
         series = one.series;
-        FileCheck file;
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            file = one.file;
+        any = true;
+        if (column > 0) {
+            ImGui::SameLine(0.0f, tile_gap);
         }
-        bool usable = !one.checking && !one.file_path.empty() && file.usable();
-        std::string status = one.checking ? std::string("Checking…")
-                             : one.file_path.empty() ? std::string(one.about->file_empty)
-                                                     : file.message;
-        ImGui::PushID(static_cast<int>(which));
-        ImVec2 row_top = ImGui::GetCursorScreenPos();
-        // (Play first, so that the ring coming into the row from the left is on it)
-        row(width, one.name.c_str(), status.c_str(), 230.0f, 36.0f, [&] {
-            if (ui::button(one.game.running() ? "Playing…" : "Play", Kind::Primary, 110.0f, usable && !one.game.running())) {
-                play(which, online_arguments(which));
-            }
-            ImGui::SameLine(0.0f, px(10));
-            file_buttons(which, true);
-        });
-        // (the set chosen, by its own file's name, at the row's top right: a set's name is long, and a game's row
-        // is the game's own; drawn after the row, at the place the row began)
-        if (!one.file_path.empty()) {
-            std::string name = one.checking ? std::string("Checking…")
-                                            : std::filesystem::u8path(one.file_path).filename().u8string();
-            name = ui::fit_end(name, Font::Regular, ui::size::kSmall, width * 0.42f);
-            const float text_width = ui::text_size(name.c_str(), Font::Regular, ui::size::kSmall).x;
-            ImVec2 resume = ImGui::GetCursorScreenPos();
-            ImGui::SetCursorScreenPos(ImVec2(row_top.x + width - px(18) - text_width, row_top.y + px(9)));
-            ui::text(name.c_str(), Font::Regular, ui::size::kSmall, p.tertiary);
-            ImGui::SetCursorScreenPos(resume);
-        }
-        if (!one.file_path.empty() && !one.checking) {
-            ImVec2 center(row_top.x - px(14), row_top.y + px(24));
-            if (file.result == FileCheck::Result::Good) {
-                ui::check_mark(center, px(12), p.success);
-            } else if (file.usable()) {
-                ui::check_mark(center, px(12), p.accent);
-            } else {
-                ui::cross_mark(center, px(12), p.danger);
+        if (game_tile(which, tile_width, art_height)) {
+            // A game that is set up goes to its page (Play, Choose…, its Display switches, what only it has); one that
+            // is not yet has no page, so its set is chosen here
+            if (one.has_program() && !one.checking && !one.file_path.empty() && one.file.usable()) {
+                set_page(one.id);
+            } else if (one.has_program() && !one.checking) {
+                if (ui::gamepad_in_use()) {
+                    open_browser(which, false);
+                } else {
+                    choose_game_file(which);
+                }
             }
         }
-        ImGui::PopID();
+        column = (column + 1) % columns;
+        if (column == 0) {
+            ui::gap(px(18));
+        }
     }
-    games.end();
+    if (column > 0) {
+        ui::gap(px(18));
+    }
     // (what went wrong with each game's last start)
     for (const auto& one : slots_) {
         std::string text = !one->play_error.empty() ? one->name + ": " + one->play_error
@@ -3356,7 +3354,44 @@ bool App::update_news() const {
 #endif
 }
 
-// A collection's page for one game: its file, Display and Sound, Play, and the features that are its alone
+// A game's tile on the Games page: the picture of its set (black and white while the set is not there), its name, and
+// the set's name. Pressed, it goes to the game's page.
+bool App::game_tile(size_t which, float tile_width, float art_height) {
+    Slot& one = *slots_[which];
+    const ui::Palette& p = ui::palette();
+    const FileCheck file = [&] {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return one.file;
+    }();
+    const bool installed = !one.checking && !one.file_path.empty() && file.usable();
+    ImGui::PushID(static_cast<int>(which));
+    const ImVec2 top = ImGui::GetCursorScreenPos();
+    ImRect rect;
+    const bool pressed = ui::picture_tile("##art", art_ ? art_->texture(one.rom_set, !installed) : nullptr, tile_width, art_height,
+                                          installed ? p.control : p.control_active, rect);
+    // (the name, and under it the set's name: both cut at the tile's width, as a long name has no room for a second
+    // line beside its neighbour)
+    const char* status = one.checking ? recomp::i18n::tr("Checking…") : one.file_path.empty() ? recomp::i18n::tr("None chosen") : nullptr;
+    const float line = ui::text_size(one.name.c_str(), Font::Semibold, ui::size::kBody).y;
+    const std::string name = ui::fit_end(one.name, Font::Semibold, ui::size::kBody, tile_width);
+    const ImVec2 at(top.x, top.y + art_height + px(9));
+    const ImU32 name_color = installed ? p.text : p.secondary;
+    ImGui::SetCursorScreenPos(at);
+    ui::push_font(Font::Semibold, ui::size::kBody);
+    ImGui::GetWindowDrawList()->AddText(at, name_color, name.c_str());
+    ui::pop_font();
+    const std::string set = status ? std::string(status) : one.rom_set;
+    ImGui::SetCursorScreenPos(ImVec2(at.x, at.y + line + px(1)));
+    if (!set.empty()) {
+        const std::string shown = ui::fit_end(set, Font::Regular, ui::size::kDetail, tile_width);
+        ui::text(shown.c_str(), Font::Regular, ui::size::kDetail, installed ? p.secondary : p.tertiary);
+    }
+    ImGui::SetCursorScreenPos(ImVec2(top.x, at.y + line + ui::text_size("x", Font::Regular, ui::size::kDetail).y + px(1)));
+    ImGui::Dummy(ImVec2(tile_width, 0));
+    ImGui::PopID();
+    return pressed;
+}
+
 void App::title_page(size_t which, float width) {
     const ui::Palette& p = ui::palette();
     Slot& one = *slots_[which];

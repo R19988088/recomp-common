@@ -5,6 +5,8 @@
 // Part of recomp-common (https://github.com/tmcleroy/recomp-common); see THIRD_PARTY_NOTICES.md.
 #pragma once
 
+#include <SDL3/SDL.h>
+
 #include <string>
 #include <vector>
 
@@ -94,6 +96,10 @@ bool nav_item(const char* label, bool active, float width, bool reachable = true
 // A round button with a circular arrow in it, to look again (a folder, say): `size` is its diameter
 bool refresh_button(const char* id, float size = 36.0f, bool enabled = true);
 bool list_item(const char* label, bool active, float width);
+// A card a picture goes in: rounded, with a small shadow under it, and the ring round the whole of it when the arrow
+// keys or a gamepad are on it. `texture` nullptr: an empty panel of `tint` (the picture is not there yet). True when
+// it was pressed; `rect` is where it was drawn.
+bool picture_tile(const char* id_text, SDL_Texture* texture, float width, float height, ImU32 tint, ImRect& rect);
 bool key_chip(const char* id, const char* label, bool capturing, float width, ImRect& rect);
 float keycap(const char* key);
 std::string fit_start(const std::string& value, Font font, float size, float width);

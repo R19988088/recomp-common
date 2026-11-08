@@ -20,6 +20,7 @@
 #include <thread>
 #include <vector>
 
+#include "art.h"
 #include "game_process.h"
 #include "launcher.h"
 #include "online.h"
@@ -78,6 +79,7 @@ private:
         std::string id;                  // a collection's game's (a port's: "")
         std::string name;                // its name; its player folder is named by it
         std::string series;              // a collection's game's series (launcher::CollectionGame::series), or ""
+        std::string rom_set;             // its ROM set's name (launcher::CollectionGame::rom_set), or ""
         std::string exe;                 // its program, beside the launcher
         std::string file_section;        // launcher.ini: where its file is ("game", or "game.<id>")
         std::string video_section;       // its Display switches ("video", or "video.<id>")
@@ -205,6 +207,9 @@ private:
     launcher::PageContext context(float width);
     void game_page(float width);
     void library_page(float width);
+    // A game's tile on the Games page: its picture (or the place for one), its name under it, and its ROM set's name
+    // under that. A game whose set is not there yet is in black and white. True when it was pressed.
+    bool game_tile(size_t which, float tile_width, float art_height);
     void title_page(size_t which, float width);
     void series_page(size_t which, float width);  // a series' page (`which`: one of its games)
     void features_page(float width);
@@ -325,6 +330,9 @@ private:
 
     const launcher::Collection* collection_ = nullptr;  // a collection's launcher's (a port's: none)
     SDL_Window* window_;
+    // The Games page's pictures (a collection whose Collection::art_url says one): made at the start, and destroyed
+    // before the window and its renderer go
+    std::unique_ptr<launcher::Art> art_;
     int page_ = 0;
     std::filesystem::path folder_;          // the player's (a collection's: its own, with its launcher.ini)
     recomp::Ini prefs_;     // launcher.ini: where each game's file is, the Display switches

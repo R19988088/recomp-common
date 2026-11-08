@@ -692,6 +692,43 @@ bool list_item(const char* label, bool active, float width) {
     return pressed;
 }
 
+// A small shadow under a card: two rounded rects, widening and fading, as the system's cards have. ImGui has no
+// shadow of its own, and the ring is drawn outside the card too (focus_ring).
+void shadow(ImDrawList* list, const ImRect& rect, float rounding) {
+    const float reach = px(5.0f);
+    for (int step = 2; step >= 1; step--) {
+        const float grow = reach * static_cast<float>(step) / 2.0f;
+        ImRect under(rect.Min - ImVec2(grow * 0.4f, -grow * 0.5f), rect.Max + ImVec2(grow * 0.4f, grow));
+        list->AddRectFilled(under.Min, under.Max, IM_COL32(0, 0, 0, static_cast<int>(14.0f / step)), rounding + grow);
+    }
+}
+
+bool picture_tile(const char* id_text, SDL_Texture* texture, float width, float height, ImU32 tint, ImRect& rect) {
+    ImGuiWindow* window = ImGui::GetCurrentWindow();
+    ImGuiID id = window->GetID(id_text);
+    ImVec2 box(px(width), px(height));
+    rect = ImRect(window->DC.CursorPos, window->DC.CursorPos + box);
+    bool hovered = false;
+    bool held = false;
+    bool pressed = behavior(rect, id, true, hovered, held);
+    const Palette& p = palette();
+    float hover = animate(id + 1, hovered ? 1.0f : 0.0f, 22.0f);
+    float press = animate(id + 2, held ? 1.0f : 0.0f, 30.0f);
+    const float rounding = px(10);
+    ImRect shown = pressed_rect(rect, press);
+    shadow(window->DrawList, shown, rounding);
+    window->DrawList->AddRectFilled(shown.Min, shown.Max, tint, rounding);
+    if (texture) {
+        window->DrawList->AddImageRounded(ImTextureRef(reinterpret_cast<ImTextureID>(texture)), shown.Min, shown.Max, ImVec2(0, 0), ImVec2(1, 1),
+                                          IM_COL32_WHITE, rounding);
+        if (hover > 0.0f) {
+            window->DrawList->AddRectFilled(shown.Min, shown.Max, fade(p.overlay, hover * 0.10f), rounding);
+        }
+    }
+    focus_ring(rect, id, rounding);
+    return pressed;
+}
+
 bool key_chip(const char* id_text, const char* label, bool capturing, float width, ImRect& rect) {
     ImGuiWindow* window = ImGui::GetCurrentWindow();
     ImGuiID id = window->GetID(id_text);
