@@ -2328,7 +2328,7 @@ bool App::take_invitation(size_t* which, std::string* code, std::string* from, s
 // controls are not touched. Yes stops the game (which saves what it keeps on the way out) and starts the same game
 // again joining that match; No tells the host, which stops waiting on this player.
 void App::answer_invitations() {
-    if (!online_on()) {
+    if (!online_on() || asking_invitation_) {
         return;
     }
     size_t which = 0;
@@ -2346,18 +2346,31 @@ void App::answer_invitations() {
     const SDL_MessageBoxData box = {SDL_MESSAGEBOX_INFORMATION, window_, "Online play", words.c_str(), 2, buttons, nullptr};
     int chosen = 1;
     SDL_RaiseWindow(window_);  // (the game is in front: the dialog has to be seen over it)
-    if (!SDL_ShowMessageBox(&box, &chosen) || chosen != 0) {
+    asking_invitation_ = true;
+    const bool shown = SDL_ShowMessageBox(&box, &chosen);
+    asking_invitation_ = false;
+    if (!shown) {
+        // (the system could not show it: the invitation is left for the next frame, and asked again, rather than taken
+        // for a no, which would tell the host so)
+        std::ofstream again(folder_ / "online-invite", std::ios::binary | std::ios::trunc);
+        if (again) {
+            again << slots_[which]->id << "\n" << code << "\n" << from << "\n" << title << "\n";
+            again.flush();
+        }
+        SDL_Delay(200);  // (not every frame, if the system keeps saying no)
+        return;
+    }
+    if (chosen != 0) {
         // (not now: the host is told, so that it stops waiting on this player)
         launcher::room_decline(room_url(), prefs_.get("online", "room"), code);
         return;
     }
-    // (joining: the game stops, and starts again joining that match; the switch stays on, so that the others can
-    // still reach this player afterwards)
+    // (joining: the game stops, and starts again joining that match — the switch stays on, so that the others can still
+    // reach this player afterwards)
     if (slots_[which]->game.running()) {
         slots_[which]->game.stop();
         pending_join_ = {which, code};
-    } else if (can_play(which)) {
-        set_online_on(false, which);
+    } else {
         play(which, join_arguments(slots_[which]->about->online, code));
     }
 }

@@ -389,6 +389,7 @@ private:
         std::string code;
     };
     PendingJoin pending_join_;        // (an invitation taken while the game ran: joined when it has stopped)
+    bool asking_invitation_ = false;  // (the dialog is up: it is not asked again until it is answered)
 #ifdef LAUNCHER_UPDATE_REPO
     std::unique_ptr<launcher::Updater> updater_;
     bool relaunched_ = false;  // (the new version has been started: this one quits)
