@@ -1779,7 +1779,7 @@ void App::sidebar(float height) {
         if (switched) {
             if (on) {
                 set_online_on(false, on_for < slots_.size() ? on_for : target);
-            } else if (can_play(target)) {
+            } else if (target < slots_.size() && can_play(target)) {
                 // (a game ready to play: the switch starts it hosting, as the Online page's Host does)
                 set_online_on(true, target);
                 play(target, host_arguments(slots_[target]->about->online));
@@ -2441,6 +2441,9 @@ bool App::version_matches(const std::string& version) {
 }
 
 bool App::can_play(size_t which) const {
+    if (which >= slots_.size()) {
+        return false;
+    }
     const Slot& one = *slots_[which];
     bool usable;
     {
