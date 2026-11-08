@@ -230,6 +230,9 @@ private:
     void online_card(size_t which, float width, bool ready);
     // Under the game's other cards: its Online card, and Steam's (Linux)
     void play_cards(size_t which, float width, bool ready);
+    // What Play starts a game with while the online switch is on: the same as the Online page's Host (nothing for a
+    // game the switch is not for)
+    std::vector<std::string> online_arguments(size_t which) const;
     // Host's arguments for a game's Online: listed under the player's name if they have one, and arcade while waiting
     // if they switched it on; and the row with that switch
     std::vector<std::string> host_arguments(const launcher::Online& online) const;
@@ -278,6 +281,8 @@ private:
     void empty_row(float width, const char* text, bool looking);
     void room_card(float width, const std::vector<size_t>& playable);
     void invitations_card(float width);
+    // An invitation waiting while the switch is on and no game runs: asked with the system's own dialog
+    void ask_pending_invitations();
     std::vector<std::string> invite_arguments(const launcher::Online& online, const launcher::RoomPlayer& player) const;
     void block(const std::string& id);
     // A game that can be started now (its file chosen and good, its program there, not running)
@@ -374,6 +379,7 @@ private:
     bool room_in_ = false;
     bool room_lists_ = true; // (the check-in brings the Online page's lobby list too: until a service answers without it)
     std::vector<std::string> room_answered_;
+    bool asking_invitation_ = false;  // (the dialog is up: it is not asked again until it is answered)
     std::string room_id_;             // ([online] id: what the service knows the player by, made from the secret once)
 #ifdef LAUNCHER_UPDATE_REPO
     std::unique_ptr<launcher::Updater> updater_;
