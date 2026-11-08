@@ -380,6 +380,7 @@ private:
     bool room_lists_ = true; // (the check-in brings the Online page's lobby list too: until a service answers without it)
     std::vector<std::string> room_answered_;
     std::string room_id_;             // ([online] id: what the service knows the player by, made from the secret once)
+    std::string online_state_;        // (the state file as last written: written again only when it differs)
     char online_join_code_[16] = {};  // (an accepted invitation's match, once the game has quit)
 #ifdef LAUNCHER_UPDATE_REPO
     std::unique_ptr<launcher::Updater> updater_;

@@ -2266,17 +2266,16 @@ size_t App::online_game() const {
 // What the game reads when it starts: the switch, and whose it is, the player's name and id, and the room's. Written
 // whenever one of those changes; removed while online play is off.
 void App::write_online_state() {
-    static std::string written;
     std::string text;
     if (online_on()) {
         const size_t which = online_game();
         text = "1\n" + (which < slots_.size() ? slots_[which]->id : std::string()) + "\n" + prefs_.get("online", "name") + "\n" + room_id() + "\n" +
                (room_url() ? room_url() : "");
     }
-    if (text == written) {
+    if (text == online_state_) {
         return;
     }
-    written = text;
+    online_state_ = text;
     std::error_code error;
     if (text.empty()) {
         std::filesystem::remove(online_state_path(), error);
