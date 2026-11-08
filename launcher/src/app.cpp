@@ -2179,6 +2179,22 @@ void App::online_card(size_t which, float width, bool ready) {
     }
 }
 
+// A service URL with [online] service's address in place of the one the build names, when the player set one (a
+// service of their own: online/README.md). The path is kept, so every entry follows the same service.
+std::string App::service(const char* url) const {
+    const std::string mine = prefs_.get("online", "service");
+    if (!url || url[0] == '\0' || mine.empty()) {
+        return url ? std::string(url) : std::string();
+    }
+    const size_t path = std::string(url).find('/', std::string(url).find("//") + 2);
+    const std::string rest = path == std::string::npos ? std::string() : std::string(url).substr(path);
+    std::string base = mine;
+    while (!base.empty() && base.back() == '/') {
+        base.pop_back();
+    }
+    return base + rest;
+}
+
 const char* App::room_url() const {
     return collection_ ? collection_->room : about_.online.room;
 }
@@ -2450,7 +2466,7 @@ void App::online_page(float width) {
         invitations_card(width);
     }
     // Every game's open matches, by game, in the sidebar's order; highlighted while one can be joined
-    follow_lobby(collection_->lobby);
+    follow_lobby(service(collection_->lobby));
     const auto joinable = [&](const launcher::OpenMatch& match, size_t which) {
         std::lock_guard<std::mutex> lock(mutex_);
         return slots_[which]->id == match.game && version_matches(match.version) && !slots_[which]->checking && slots_[which]->file.usable();
@@ -2608,7 +2624,7 @@ void App::online_page(float width) {
                         }
                     }
                 } else if (ui::button(asking ? "Joining…" : "Join", Kind::Secondary, 130.0f, !asking && !code.empty())) {
-                    join_lookup_ = std::async(std::launch::async, [url = std::string(collection_->code_lookup) + code] { return launcher::lookup_code(url); });
+                    join_lookup_ = std::async(std::launch::async, [url = service(collection_->code_lookup) + code] { return launcher::lookup_code(url); });
                 }
             });
         join.end();
@@ -2689,7 +2705,7 @@ void App::online_page(float width) {
 }
 
 void App::follow_room(bool here) {
-    const std::string url = room_url();
+    const std::string url = service(room_url());
     // (a game that is running is in the waiting room itself, on the one secret: the launcher neither checks in nor
     // leaves while it does, or leaving would take the game out of the room)
     const bool playing = any_running();
@@ -2784,7 +2800,7 @@ void App::block(const std::string& id) {
                         room_.players.end());
     for (const launcher::Invitation& invitation : room_.invitations) {
         if (invitation.from == id) {
-            launcher::room_decline(room_url(), prefs_.get("online", "room"), invitation.code);
+            launcher::room_decline(service(room_url()), prefs_.get("online", "room"), invitation.code);
             room_answered_.push_back(invitation.code);
         }
     }
@@ -2848,7 +2864,7 @@ void App::ask_pending_invitations() {
             play(which, join_arguments(slots_[which]->about->online, invitation.code));
         } else {
             room_answered_.push_back(invitation.code);
-            launcher::room_decline(room_url(), prefs_.get("online", "room"), invitation.code);
+            launcher::room_decline(service(room_url()), prefs_.get("online", "room"), invitation.code);
         }
         return;  // (one at a time: the next is asked on the next frame)
     }
@@ -2910,7 +2926,7 @@ void App::invitations_card(float width) {
             ImGui::SameLine(0.0f, px(10));
             if (ui::button("Decline", Kind::Secondary, 120.0f)) {
                 room_answered_.push_back(invitation->code);
-                launcher::room_decline(room_url(), prefs_.get("online", "room"), invitation->code);
+                launcher::room_decline(service(room_url()), prefs_.get("online", "room"), invitation->code);
             }
             ImGui::SameLine(0.0f, px(10));
             if (ui::button("Block", Kind::Secondary, 100.0f)) {

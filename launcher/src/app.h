@@ -253,6 +253,8 @@ private:
     // The waiting room (Collection::room): checked in at every online_every() while it is on (the sidebar's switch, or
     // the Online page) and no game runs, and left when not; its card, and the invitations' card
     // The waiting room's URL and protocol: the collection's, or the one game's Online card's (nullptr: none)
+    // (a service of the player's own, [online] service, in place of the build's; the path kept)
+    std::string service(const char* url) const;
     const char* room_url() const;
     int room_protocol() const;
     // A game's id in the waiting room: a collection's game's, or the one game's Online::game
