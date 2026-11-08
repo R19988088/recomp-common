@@ -2705,6 +2705,7 @@ void App::online_page(float width) {
 }
 
 void App::follow_room(bool here) {
+    load_online();  // (the name and the id are kept in launcher.ini: a check-in from any page has them)
     const std::string url = service(room_url());
     // (a game that is running is in the waiting room itself, on the one secret: the launcher neither checks in nor
     // leaves while it does, or leaving would take the game out of the room)
