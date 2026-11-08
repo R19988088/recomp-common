@@ -401,6 +401,21 @@ int play_directly(const std::string& id, const std::vector<std::string>& extra) 
     }
     std::filesystem::create_directories(target->folder / "logs", error);
     std::vector<std::string> arguments = arguments_for(prefs, *target);
+    // (the online switch on for this game: it hosts from here too, as from Play, so a Steam shortcut starts a match)
+    if (prefs.get("online", "on") == "1" && about.online.host_argument && prefs.get("online", "on_game") == id) {
+        std::vector<std::string> online = {about.online.host_argument};
+        if (about.online.name_argument && !prefs.get("online", "name").empty()) {
+            if (about.online.lobby && about.online.list_argument) {
+                online.push_back(about.online.list_argument);
+            }
+            online.push_back(about.online.name_argument);
+            online.push_back(prefs.get("online", "name"));
+        }
+        if (about.online.arcade_argument && prefs.get("online", "arcade") == "1") {
+            online.push_back(about.online.arcade_argument);
+        }
+        arguments.insert(arguments.end(), online.begin(), online.end());
+    }
     arguments.insert(arguments.end(), extra.begin(), extra.end());
     if (!game.start(program_path(target->exe), arguments, target->folder, message, target->folder / "logs" / "game.log")) {
         say(SDL_MESSAGEBOX_ERROR, target->name, message);
