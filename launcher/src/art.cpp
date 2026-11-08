@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <system_error>
-#include <thread>
 
 #include "run_program.h"
 
@@ -40,26 +39,65 @@ bool read_png(const fs::path& file, std::vector<unsigned char>& bytes, int& widt
 
 }  // namespace
 
-// What a fetching thread does for one set: the file, fetched there once and kept. False: it is not there and could
-// not be fetched.
-bool Art::fetch(const fs::path& file, const std::string& address) {
-    std::error_code error;
-    if (!fs::exists(file, error)) {
-        fs::create_directories(file.parent_path(), error);
-        const int code =
-            run_program(curl_program(), {"-fsSL", "--connect-timeout", "5", "--max-time", "15", "-A", "recomp-launcher", "-o", file.u8string(), address},
-                        nullptr);
-        if (code != 0) {
-            std::error_code ignored;
-            fs::remove(file, ignored);
-            return false;
+// The fetching thread: one picture at a time, so that a first run does not start them all at once. Each is kept in the
+// player's folder, so it is fetched once in the folder's life and drawn at once by the next run.
+void Art::fetch_all(std::shared_ptr<Shared> shared, std::string url) {
+    for (;;) {
+        std::string set, address;
+        fs::path file;
+        {
+            std::lock_guard<std::mutex> lock(shared->mutex);
+            if (shared->stopped || shared->queue.empty()) {
+                return;
+            }
+            set = shared->queue.front();
+            shared->queue.erase(shared->queue.begin());
+            file = shared->folder / "art" / (set + ".png");
+            address = url;
+            if (const size_t at = address.find("%s"); at != std::string::npos) {
+                address.replace(at, 2, set);
+            }
         }
+        std::error_code error;
+        bool there = fs::exists(file, error);
+        if (!there) {
+            fs::create_directories(file.parent_path(), error);
+            const int code = run_program(
+                curl_program(), {"-fsSL", "--connect-timeout", "5", "--max-time", "15", "-A", "recomp-launcher", "-o", file.u8string(), address}, nullptr);
+            if (code != 0) {
+                fs::remove(file, error);
+                if (code == -1 || code == 6 || code == 7 || code == 28) {
+                    std::lock_guard<std::mutex> lock(shared->mutex);
+                    shared->queue.clear();  // (the server cannot be reached: nothing more is tried this run)
+                    return;
+                }
+            }
+            there = code == 0;
+        }
+        std::vector<unsigned char> pixels;
+        int width = 0, height = 0;
+        if (there && !read_png(file, pixels, width, height)) {
+            fs::remove(file, error);  // (a truncated or wrong file is not kept: the next run fetches it again)
+        } else if (there) {
+            std::lock_guard<std::mutex> lock(shared->mutex);
+            if (shared->stopped) {
+                return;
+            }
+            if (auto at = shared->pictures.find(set); at != shared->pictures.end()) {
+                at->second->pixels = std::move(pixels);
+                at->second->width = width;
+                at->second->height = height;
+                at->second->ready = true;
+            }
+        }
+        // (a picture has come: the launcher draws it in its next frame)
+        SDL_Event event{};
+        event.type = SDL_EVENT_USER;
+        SDL_PushEvent(&event);
     }
-    return true;
 }
 
-Art::Art(SDL_Window* window, const fs::path& folder, const std::string& url)
-    : shared_(std::make_shared<Shared>()), window_(window), url_(url) {
+Art::Art(SDL_Window* window, const fs::path& folder, const std::string& url) : shared_(std::make_shared<Shared>()), window_(window), url_(url) {
     shared_->folder = folder;
 }
 
@@ -68,8 +106,13 @@ Art::~Art() {
 }
 
 void Art::close() {
-    std::lock_guard<std::mutex> lock(shared_->mutex);
-    shared_->stopped = true;
+    {
+        std::lock_guard<std::mutex> lock(shared_->mutex);
+        shared_->stopped = true;
+    }
+    if (worker_.joinable()) {
+        worker_.join();
+    }
     for (auto& [set, picture] : shared_->pictures) {
         destroy_textures(*picture);
     }
@@ -78,17 +121,17 @@ void Art::close() {
 
 bool Art::working() const {
     std::lock_guard<std::mutex> lock(shared_->mutex);
-    return !shared_->waiting.empty();
+    return !shared_->queue.empty();
 }
 
-SDL_Texture* Art::make(Picture& picture, bool grey) {
+SDL_Texture* Art::make(Picture& picture, bool grey) const {
     SDL_Texture*& which = grey ? picture.grey : picture.colour;
     if (which) {
         return which;
     }
     std::vector<unsigned char> pixels = picture.pixels;
     if (grey) {
-        // (the same picture with its colour gone: the game's set is not there yet)
+        // (the same picture with its colour gone: the game's set is not there)
         for (size_t at = 0; at + 3 < pixels.size(); at += 4) {
             const auto level =
                 static_cast<unsigned char>(std::min(255.0f, 0.299f * pixels[at] + 0.587f * pixels[at + 1] + 0.114f * pixels[at + 2] + 0.5f));
@@ -122,51 +165,13 @@ SDL_Texture* Art::texture(const std::string& set, bool grey) {
     Picture& picture = *it->second;
     if (!picture.asked) {
         picture.asked = true;
-        std::string address = url_;
-        if (const size_t at = address.find("%s"); at != std::string::npos) {
-            address.replace(at, 2, set);
+        shared_->queue.push_back(set);
+        if (!worker_.joinable()) {
+            worker_ = std::thread([shared = shared_, url = url_] { fetch_all(shared, url); });
         }
-        shared_->waiting.push_back(set);
-        const fs::path file = shared_->folder / "art" / (set + ".png");
-        // A thread of its own per picture, which the launcher never waits for: it holds the shared state (outliving
-        // this object) and never touches the window. Each picture is fetched once and kept, so the next run draws it
-        // at once.
-        auto shared = shared_;
-        std::thread([shared, set, file, address] {
-            const bool there = fetch(file, address);
-            std::vector<unsigned char> pixels;
-            int width = 0, height = 0;
-            const bool read = there && read_png(file, pixels, width, height);
-            if (!read) {
-                std::error_code ignored;
-                fs::remove(file, ignored);
-            }
-            {
-                std::lock_guard<std::mutex> lock(shared->mutex);
-                shared->waiting.erase(std::remove(shared->waiting.begin(), shared->waiting.end(), set), shared->waiting.end());
-                if (!there) {
-                    // (the server could not be reached: the other pictures are not tried either, this run)
-                    shared->unreachable = true;
-                    shared->waiting.clear();
-                } else if (read && !shared->stopped) {
-                    if (auto at = shared->pictures.find(set); at != shared->pictures.end()) {
-                        at->second->pixels = std::move(pixels);
-                        at->second->width = width;
-                        at->second->height = height;
-                        at->second->ready = true;
-                    }
-                }
-            }
-            SDL_Event event{};
-            event.type = SDL_EVENT_USER;
-            SDL_PushEvent(&event);  // (the launcher draws the picture in its next frame)
-        }).detach();
         return nullptr;
     }
-    if (!picture.ready) {
-        return nullptr;
-    }
-    return make(picture, grey);
+    return picture.ready ? make(picture, grey) : nullptr;
 }
 
 }  // namespace launcher
