@@ -2045,7 +2045,7 @@ bool App::play_button(size_t which, float width) {
         ui::gap(12);
     }
     if (ui::button(one.game.running() ? "Playing…###play" : "Play###play", Kind::Primary, 200.0f, ready, 48.0f)) {
-        play(which);
+        play(which, online_arguments(which));
     }
     // With a gamepad in hand the ring starts on Play, once there is a game to play
     if (start_focus_ != 0 && ImGui::GetFocusID() != start_focus_) {
@@ -2271,6 +2271,19 @@ void App::set_online_on(bool on, size_t which) {
     prefs_.set("online", "on", on ? "1" : "0");
     prefs_.save();
     room_at_ = 0;  // (in the waiting room, or out, at once)
+}
+
+// What Play starts the game with while the online switch is on: the match's own, as the Online page's Host gives
+// them. The switch is on for the game it was switched on at (or for the first one played after it was switched on).
+std::vector<std::string> App::online_arguments(size_t which) const {
+    if (!online_on() || which >= slots_.size() || !slots_[which]->about->online.host_argument) {
+        return {};
+    }
+    const size_t on_for = online_game();
+    if (on_for < slots_.size() && on_for != which) {
+        return {};
+    }
+    return host_arguments(slots_[which]->about->online);
 }
 
 std::vector<std::string> App::host_arguments(const launcher::Online& online) const {
@@ -3150,7 +3163,7 @@ void App::library_page(float width) {
         // (Play first, so that the ring coming into the row from the left is on it)
         row(width, one.name.c_str(), status.c_str(), 230.0f, 36.0f, [&] {
             if (ui::button(one.game.running() ? "Playing…" : "Play", Kind::Primary, 110.0f, usable && !one.game.running())) {
-                play(which);
+                play(which, online_arguments(which));
             }
             ImGui::SameLine(0.0f, px(10));
             file_buttons(which, true);
