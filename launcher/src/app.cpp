@@ -1150,8 +1150,6 @@ void App::play(size_t which, const std::vector<std::string>& extra) {
         std::filesystem::create_directories(one.folder / "saves", error);
     }
     std::filesystem::create_directories(one.folder / "logs", error);
-    // (what the game reads at its start: whose the switch is, and the player's name and id)
-    write_online_state();
     one.settings.save();
     one.values_before = recomp::FeatureValues(one.settings, one.features);
     Target target;
@@ -1390,9 +1388,8 @@ void App::frame() {
             after_game(one);
             show_focus_ = interactive_ && SDL_HasGamepad();  // (back from the game with a gamepad in hand)
             one.was_running = false;
-            // (the game over: online play is off with it, unless the stop was this launcher's, for an invitation taken
-            // while it ran, which is joined next)
-            if (pending_join_.which != which && online_on()) {
+            // (the game over: the switch goes off with it)
+            if (online_on()) {
                 set_online_on(false, which);
             }
             if (multi_.mode >= 0 && multi_.at < multi_.games.size() && multi_.games[multi_.at] == which) {
@@ -1400,17 +1397,6 @@ void App::frame() {
             }
         }
         one.was_running = one.game.running();
-    }
-    if (pending_join_.which < slots_.size() && !slots_[pending_join_.which]->game.running()) {
-        // (an invitation taken while the game ran: the same game, started again joining that match)
-        const size_t which = pending_join_.which;
-        const std::string code = pending_join_.code;
-        pending_join_ = {};
-        if (can_play(which)) {
-            play(which, join_arguments(slots_[which]->about->online, code));
-        } else {
-            set_online_on(false, which);
-        }
     }
 #ifdef LAUNCHER_UPDATE_REPO
     // The new version installed: it is started, and this one quits (not for pictures, which start nothing)
@@ -1756,8 +1742,8 @@ void App::sidebar(float height) {
         const size_t on_for = online_game();
         const size_t target = shown_kind == Page::Title || shown_kind == Page::Series ? shown_game : on_for;
         const bool on = online_on() && on_for < slots_.size();
-        const bool ready = target < slots_.size() && slots_[target]->about->online.host_argument &&
-                           (can_play(target) || slots_[target]->game.running());
+        // (a game it can start a match in: the one whose page is shown, or the one it was last on for)
+        const bool ready = target < slots_.size() && slots_[target]->about->online.host_argument && can_play(target);
         const float foot = height - px(104);
         ImGui::SetCursorScreenPos(origin + ImVec2(px(24), foot));
         const std::string id = room_id();
@@ -1774,13 +1760,9 @@ void App::sidebar(float height) {
                  on ? p.accent : ready ? p.tertiary : p.tertiary, px(inner) - px(46));
         if (switched) {
             if (on) {
-                // (off: the game, if it is the one running, leaves the room and stops hosting by itself: it reads the
-                // state file)
                 set_online_on(false, on_for < slots_.size() ? on_for : target);
-            } else if (slots_[target]->game.running()) {
-                // (already playing: the switch alone starts the hosting, from the state file)
-                set_online_on(true, target);
             } else if (can_play(target)) {
+                // (the Online page's "choose a game, then Host", in one move: the same arguments that button gives)
                 set_online_on(true, target);
                 play(target, host_arguments(slots_[target]->about->online));
             }
@@ -1829,8 +1811,6 @@ void App::page(float width, float height) {
         // (checked in while the switch is on, from any page, or while the Online page is open; never beside a running
         // game, which is in the room itself)
         follow_room(!any_running() && (online_on() || kind == (online_page ? Page::Online : Page::Game)));
-        // (an invitation the game left, asked about as the system's own dialog)
-        answer_invitations();
     }
     switch (kind) {
     case Page::Game:
@@ -2246,10 +2226,6 @@ void App::set_room_id(const std::string& id) {
     room_at_ = 0;  // (the room is asked again at once, so that the old id is not left in it)
 }
 
-std::filesystem::path App::online_state_path() const {
-    return folder_ / "online-state";
-}
-
 bool App::online_on() const {
     return prefs_.get("online", "on") == "1";
 }
@@ -2264,115 +2240,16 @@ size_t App::online_game() const {
     return slots_.size();
 }
 
-// What the game reads when it starts: the switch, and whose it is, the player's name and id, and the room's. Written
-// whenever one of those changes; removed while online play is off.
-void App::write_online_state() {
-    std::string text;
-    if (online_on()) {
-        const size_t which = online_game();
-        text = "1\n" + (which < slots_.size() ? slots_[which]->id : std::string()) + "\n" + prefs_.get("online", "name") + "\n" + room_id() + "\n" +
-               (room_url() ? room_url() : "");
-    }
-    if (text == online_state_) {
-        return;
-    }
-    online_state_ = text;
-    std::error_code error;
-    if (text.empty()) {
-        std::filesystem::remove(online_state_path(), error);
-        return;
-    }
-    if (std::ofstream file(online_state_path(), std::ios::binary | std::ios::trunc); file) {
-        file << text;
-    }
-}
-
+// The switch: the Online page's "choose a game, then Host" in one move. It starts that game with the Online card's
+// own host arguments (exactly as that button does), so every game that can host online hosts from the switch too, and
+// nothing of the game is changed for it. What it is on for is kept, so that the switch shows the match while it runs.
 void App::set_online_on(bool on, size_t which) {
     if (on && which < slots_.size()) {
         prefs_.set("online", "on_game", slots_[which]->id);
     }
     prefs_.set("online", "on", on ? "1" : "0");
     prefs_.save();
-    write_online_state();
     room_at_ = 0;  // (in the waiting room, or out, at once)
-}
-
-// An invitation the game left for this launcher (`online-invite`: the game's id, the match's code, the host's name,
-// and the game's title, a line each). It is taken off the folder: answered once.
-bool App::take_invitation(size_t* which, std::string* code, std::string* from, std::string* title) {
-    std::ifstream file(folder_ / "online-invite", std::ios::binary);
-    if (!file) {
-        return false;
-    }
-    std::string id;
-    std::getline(file, id);
-    std::getline(file, *code);
-    std::getline(file, *from);
-    std::getline(file, *title);
-    file.close();
-    std::error_code error;
-    std::filesystem::remove(folder_ / "online-invite", error);
-    if (code->empty()) {
-        return false;
-    }
-    *which = slots_.size();
-    for (size_t n = 0; n < slots_.size(); n++) {
-        if (slots_[n]->id == id) {
-            *which = n;
-        }
-    }
-    return *which < slots_.size();
-}
-
-// The invitations the game left while it played: the system's own dialog asks, so that the game's picture and
-// controls are not touched. Yes stops the game (which saves what it keeps on the way out) and starts the same game
-// again joining that match; No tells the host, which stops waiting on this player.
-void App::answer_invitations() {
-    if (!online_on() || asking_invitation_) {
-        return;
-    }
-    size_t which = 0;
-    std::string code, from, title;
-    if (!take_invitation(&which, &code, &from, &title)) {
-        return;
-    }
-    if (!interactive_) {
-        return;  // (pictures for a test: nothing is asked, and the game goes on)
-    }
-    const std::string game = title.empty() ? slots_[which]->name : title;
-    const std::string words = (from.empty() ? std::string("A player") : from) + " invites you to a match in " + game + ". Join it now?";
-    const SDL_MessageBoxButtonData buttons[] = {{SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 0, "Join"},
-                                                {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 1, "Not now"}};
-    const SDL_MessageBoxData box = {SDL_MESSAGEBOX_INFORMATION, window_, "Online play", words.c_str(), 2, buttons, nullptr};
-    int chosen = 1;
-    SDL_RaiseWindow(window_);  // (the game is in front: the dialog has to be seen over it)
-    asking_invitation_ = true;
-    const bool shown = SDL_ShowMessageBox(&box, &chosen);
-    asking_invitation_ = false;
-    if (!shown) {
-        // (the system could not show it: the invitation is left for the next frame, and asked again, rather than taken
-        // for a no, which would tell the host so)
-        std::ofstream again(folder_ / "online-invite", std::ios::binary | std::ios::trunc);
-        if (again) {
-            again << slots_[which]->id << "\n" << code << "\n" << from << "\n" << title << "\n";
-            again.flush();
-        }
-        SDL_Delay(200);  // (not every frame, if the system keeps saying no)
-        return;
-    }
-    if (chosen != 0) {
-        // (not now: the host is told, so that it stops waiting on this player)
-        launcher::room_decline(room_url(), prefs_.get("online", "room"), code);
-        return;
-    }
-    // (joining: the game stops, and starts again joining that match — the switch stays on, so that the others can still
-    // reach this player afterwards)
-    if (slots_[which]->game.running()) {
-        slots_[which]->game.stop();
-        pending_join_ = {which, code};
-    } else {
-        play(which, join_arguments(slots_[which]->about->online, code));
-    }
 }
 
 std::vector<std::string> App::host_arguments(const launcher::Online& online) const {

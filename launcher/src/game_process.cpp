@@ -30,22 +30,6 @@ GameProcess::~GameProcess() {
     }
 }
 
-// Asks the game to end: a signal (its window closing is one too), so that it saves what it keeps on the way out
-bool GameProcess::stop() {
-    if (!running_ || process_ == 0) {
-        return false;
-    }
-#if defined(__ANDROID__)
-    return false;  // (the game is an activity of the app: left from it)
-#elif defined(_WIN32)
-    // (a console window's close would be kinder, but the game has none: terminated, as a closed window leaves it)
-    HANDLE handle = reinterpret_cast<HANDLE>(process_);
-    return TerminateProcess(handle, 0) != 0;
-#else
-    return ::kill(static_cast<pid_t>(process_), SIGTERM) == 0;
-#endif
-}
-
 #if defined(__ANDROID__)
 
 // Android: a game is a library (lib<id>.so beside the launcher's), started in a process of its own by the app's

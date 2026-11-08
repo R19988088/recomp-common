@@ -18,9 +18,6 @@ public:
                const std::filesystem::path& log = {});
     bool running() const { return running_; }
     int exit_code() const { return exit_code_; }
-    // Asks the game to end, as closing its window does (a signal: it saves what it keeps, then quits). False if it is
-    // not running, or the system could not be asked.
-    bool stop();
     // Runs `program args...` and returns its standard output (for --list-features).
     static std::string output_of(const std::filesystem::path& program, const std::vector<std::string>& args);
 
@@ -28,5 +25,4 @@ private:
     std::thread waiter_;
     std::atomic<bool> running_{false};
     std::atomic<int> exit_code_{0};
-    std::atomic<long long> process_{0};  // (the pid, or the handle on Windows: stopped by stop())
 };
