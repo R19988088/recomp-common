@@ -472,6 +472,7 @@ int main(int argc, char** argv) {
         }
         SDL_RenderPresent(renderer);
     }
+    app.close_pictures();  // (its textures are the renderer's, which goes next)
     ImGui_ImplSDLRenderer3_Shutdown();
     ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();

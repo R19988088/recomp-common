@@ -557,6 +557,12 @@ App::~App() {
     }
 }
 
+void App::close_pictures() {
+    if (art_) {
+        art_->close();
+    }
+}
+
 bool App::busy() const {
     for (const launcher::CustomPage& page : about_.pages) {
         if (page.busy && page.busy()) {

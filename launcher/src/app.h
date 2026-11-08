@@ -71,6 +71,9 @@ public:
     // A finger dragged on a touch screen (main.cpp): over the sidebar (x, in the window's points, is in it) its list is
     // scrolled by `by` points, as the mouse wheel scrolls it; false where it is not the sidebar's
     bool scroll_sidebar(float x, float by);
+    // The Games page's pictures are the renderer's: this releases them, before the window and the renderer go (which
+    // is before this object does)
+    void close_pictures();
 
 private:
     // One game the launcher starts: a port's launcher has one, a collection's one for each of its games.
