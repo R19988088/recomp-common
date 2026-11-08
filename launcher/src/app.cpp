@@ -3371,22 +3371,19 @@ bool App::game_tile(size_t which, float tile_width, float art_height) {
     ImRect rect;
     const bool pressed = ui::picture_tile("##art", art_ ? art_->texture(one.rom_set, !installed) : nullptr, tile_width, art_height,
                                           installed ? p.control : p.control_active, rect);
-    // (the name, and under it the set's name: both cut at the tile's width, as a long name has no room for a second
-    // line beside its neighbour)
-    const char* status = one.checking ? recomp::i18n::tr("Checking…") : one.file_path.empty() ? recomp::i18n::tr("None chosen") : nullptr;
+    // (the name, and under it the archive's name: the one the player chose, or the one the set is looked for by, so
+    // that a game that is not set up says which file it needs)
+    const std::string archive = one.checking ? std::string("Checking…")
+                                 : !one.file_path.empty() ? std::filesystem::u8path(one.file_path).filename().u8string()
+                                                          : one.rom_set + ".zip";
     const std::string name = ui::fit_end(one.name, Font::Semibold, ui::size::kBody, tile_width);
     const ImU32 name_color = installed ? p.text : p.secondary;
     ui::push_font(Font::Semibold, ui::size::kBody);
     ImGui::GetWindowDrawList()->AddText(ImGui::GetCursorScreenPos(), name_color, name.c_str());
     ui::pop_font();
     ImGui::Dummy(ImVec2(tile_width, ui::text_size("x", Font::Semibold, ui::size::kBody).y));
-    const std::string set = status ? std::string(status) : one.rom_set;
-    if (!set.empty()) {
-        const std::string shown = ui::fit_end(set, Font::Regular, ui::size::kDetail, tile_width);
-        ui::text(shown.c_str(), Font::Regular, ui::size::kDetail, installed ? p.secondary : p.tertiary);
-    } else {
-        ui::gap(ui::text_size("x", Font::Regular, ui::size::kDetail).y);
-    }
+    const std::string shown = ui::fit_end(archive, Font::Regular, ui::size::kDetail, tile_width);
+    ui::text(shown.c_str(), Font::Regular, ui::size::kDetail, installed ? p.secondary : p.tertiary);
     ImGui::Dummy(ImVec2(tile_width, 0));
     ImGui::EndGroup();
     ImGui::PopID();
