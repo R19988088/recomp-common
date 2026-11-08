@@ -403,6 +403,7 @@ int play_directly(const std::string& id, const std::vector<std::string>& extra) 
     std::vector<std::string> arguments = arguments_for(prefs, *target);
     // (the online switch on: it hosts from here too, as from Play, so a Steam shortcut starts a match. The switch is
     // for the game it names; with none named yet, it is for the first game played)
+#ifdef LAUNCHER_ONLINE_SWITCH
     const std::string switch_game = prefs.get("online", "on_game");
     if (prefs.get("online", "on") == "1" && about.online.host_argument && (switch_game.empty() || switch_game == id)) {
         std::vector<std::string> online = {about.online.host_argument};
@@ -418,6 +419,7 @@ int play_directly(const std::string& id, const std::vector<std::string>& extra) 
         }
         arguments.insert(arguments.end(), online.begin(), online.end());
     }
+#endif
     arguments.insert(arguments.end(), extra.begin(), extra.end());
     if (!game.start(program_path(target->exe), arguments, target->folder, message, target->folder / "logs" / "game.log")) {
         say(SDL_MESSAGEBOX_ERROR, target->name, message);
@@ -1754,7 +1756,9 @@ void App::sidebar(float height) {
     focus_seen_ = focused;
     // The foot of the sidebar: online play — the player's id and a switch that is always usable. On, it waits in the
     // waiting room (so an invitation reaches the player without any game started), and the game of the page shown is
-    // hosted with the match as the Online page's Host would.
+    // hosted with the match as the Online page's Host would. (Built without it: the Online page's own Host and Join
+    // are the whole of online play, as they were.)
+#ifdef LAUNCHER_ONLINE_SWITCH
     if (room_url() && slots_.size() > 0) {
         const size_t on_for = online_game();
         const size_t target = shown_kind == Page::Title || shown_kind == Page::Series ? shown_game : on_for;
@@ -1789,6 +1793,7 @@ void App::sidebar(float height) {
             }
         }
     }
+#endif
     ImGui::SetCursorScreenPos(origin + ImVec2(px(24), height - px(36)));
     ui::text(LAUNCHER_DISCLAIMER, Font::Regular, ui::size::kSmall, p.tertiary, px(inner));
 }
@@ -2265,7 +2270,11 @@ void App::set_room_id(const std::string& id) {
 }
 
 bool App::online_on() const {
+#ifdef LAUNCHER_ONLINE_SWITCH
     return prefs_.get("online", "on") == "1";
+#else
+    return false;  // (built without the switch: nothing in launcher.ini turns online play on by itself)
+#endif
 }
 
 size_t App::online_game() const {
