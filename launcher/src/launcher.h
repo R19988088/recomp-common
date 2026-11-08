@@ -230,8 +230,8 @@ struct CollectionGame {
     const char *exe;         // its program, beside the launcher (as LAUNCHER_GAME_EXE)
     const char *home_env;    // a variable naming a folder to use instead of its own, for tests (LAUNCHER_HOME_ENV)
     Description description; // what a launcher of its own is told (its pages, if any, are not shown)
-    // The ROM set's name ("vsavj"), as the Games page shows it under the game's name, and the name its picture is
-    // fetched by (Collection::art_url). nullptr: neither
+    // The ROM set's name ("vsavj"), as the Games page shows it under the game's name, and the name of its picture
+    // (art/<set>.png). nullptr: neither
     const char *rom_set = nullptr;
     // The series it is one of, as the player reads it ("Street Fighter Alpha"), or nullptr. Two or more games of a series
     // with a page of their own are under one row of the sidebar, which opens and closes and has a page of the series'
@@ -307,11 +307,10 @@ struct Collection {
     const char *room = nullptr;
     int room_protocol = 0;
     const char *file_name = "game file"; // what a game's file is called, as the Online page says it ("ROM set")
-    // The Games page: a picture of each game (CollectionGame::rom_set), as a tile, with the game's name and its set's
-    // name under it. `art_url` is the URL of one, with "%s" where the set's name goes: fetched once by the system's
-    // curl into the launcher's folder and kept there. nullptr: the games are a list, as before. What is of a game is
-    // never compiled in or shipped with the launcher.
-    const char *art_url = nullptr;
+    // The Games page: a picture of each game (CollectionGame::rom_set) as a tile, with the game's name and its set's
+    // name under it. The pictures are files named for their sets (art/<set>.png) in an `art` folder beside the
+    // launcher, or in a bundle's Resources; a game with no picture there is a tile of its name alone. (The pictures
+    // are the games' own art: whoever builds a launcher puts them there; nothing is fetched.)
     // The category of the features the Online page shows too, as the Features page does (what a match shows: the
     // ping...), or nullptr
     const char *online_features = nullptr;

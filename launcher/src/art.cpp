@@ -7,8 +7,6 @@
 #include <algorithm>
 #include <system_error>
 
-#include "run_program.h"
-
 namespace fs = std::filesystem;
 
 namespace launcher {
@@ -39,89 +37,28 @@ bool read_png(const fs::path& file, std::vector<unsigned char>& bytes, int& widt
 
 }  // namespace
 
-// The fetching thread: one picture at a time, so that a first run does not start them all at once. Each is kept in the
-// player's folder, so it is fetched once in the folder's life and drawn at once by the next run.
-void Art::fetch_all(std::shared_ptr<Shared> shared, std::string url) {
-    for (;;) {
-        std::string set, address;
-        fs::path file;
-        {
-            std::lock_guard<std::mutex> lock(shared->mutex);
-            if (shared->stopped || shared->queue.empty()) {
-                return;
-            }
-            set = shared->queue.front();
-            shared->queue.erase(shared->queue.begin());
-            file = shared->folder / "art" / (set + ".png");
-            address = url;
-            if (const size_t at = address.find("%s"); at != std::string::npos) {
-                address.replace(at, 2, set);
-            }
-        }
-        std::error_code error;
-        bool there = fs::exists(file, error);
-        if (!there) {
-            fs::create_directories(file.parent_path(), error);
-            const int code = run_program(
-                curl_program(), {"-fsSL", "--connect-timeout", "5", "--max-time", "15", "-A", "recomp-launcher", "-o", file.u8string(), address}, nullptr);
-            if (code != 0) {
-                fs::remove(file, error);
-                if (code == -1 || code == 6 || code == 7 || code == 28) {
-                    std::lock_guard<std::mutex> lock(shared->mutex);
-                    shared->queue.clear();  // (the server cannot be reached: nothing more is tried this run)
-                    return;
-                }
-            }
-            there = code == 0;
-        }
-        std::vector<unsigned char> pixels;
-        int width = 0, height = 0;
-        if (there && !read_png(file, pixels, width, height)) {
-            fs::remove(file, error);  // (a truncated or wrong file is not kept: the next run fetches it again)
-        } else if (there) {
-            std::lock_guard<std::mutex> lock(shared->mutex);
-            if (shared->stopped) {
-                return;
-            }
-            if (auto at = shared->pictures.find(set); at != shared->pictures.end()) {
-                at->second->pixels = std::move(pixels);
-                at->second->width = width;
-                at->second->height = height;
-                at->second->ready = true;
-            }
-        }
-        // (a picture has come: the launcher draws it in its next frame)
-        SDL_Event event{};
-        event.type = SDL_EVENT_USER;
-        SDL_PushEvent(&event);
-    }
-}
-
-Art::Art(SDL_Window* window, const fs::path& folder, const std::string& url) : shared_(std::make_shared<Shared>()), window_(window), url_(url) {
-    shared_->folder = folder;
-}
+Art::Art(SDL_Window* window, const fs::path& folder) : window_(window), folder_(folder) {}
 
 Art::~Art() {
     close();
 }
 
 void Art::close() {
-    {
-        std::lock_guard<std::mutex> lock(shared_->mutex);
-        shared_->stopped = true;
+    for (auto& [set, picture] : pictures_) {
+        SDL_DestroyTexture(picture.colour);
+        SDL_DestroyTexture(picture.grey);
     }
-    if (worker_.joinable()) {
-        worker_.join();
-    }
-    for (auto& [set, picture] : shared_->pictures) {
-        destroy_textures(*picture);
-    }
-    shared_->pictures.clear();
+    pictures_.clear();
 }
 
-bool Art::working() const {
-    std::lock_guard<std::mutex> lock(shared_->mutex);
-    return !shared_->queue.empty();
+void Art::load(Picture& picture, const std::string& set) {
+    picture.read = true;
+    const fs::path file = folder_ / "art" / (set + ".png");
+    std::error_code error;
+    if (!fs::exists(file, error)) {
+        return;
+    }
+    read_png(file, picture.pixels, picture.width, picture.height);
 }
 
 SDL_Texture* Art::make(Picture& picture, bool grey) const {
@@ -147,31 +84,19 @@ SDL_Texture* Art::make(Picture& picture, bool grey) const {
     return which;
 }
 
-void Art::destroy_textures(Picture& picture) {
-    SDL_DestroyTexture(picture.colour);
-    SDL_DestroyTexture(picture.grey);
-    picture.colour = picture.grey = nullptr;
-}
-
 SDL_Texture* Art::texture(const std::string& set, bool grey) {
-    if (set.empty() || url_.empty()) {
+    if (set.empty() || folder_.empty()) {
         return nullptr;
     }
-    std::lock_guard<std::mutex> lock(shared_->mutex);
-    auto [it, inserted] = shared_->pictures.try_emplace(set, nullptr);
+    auto [it, inserted] = pictures_.try_emplace(set);
+    Picture& picture = it->second;
     if (inserted) {
-        it->second = std::make_unique<Picture>();
+        load(picture, set);
     }
-    Picture& picture = *it->second;
-    if (!picture.asked) {
-        picture.asked = true;
-        shared_->queue.push_back(set);
-        if (!worker_.joinable()) {
-            worker_ = std::thread([shared = shared_, url = url_] { fetch_all(shared, url); });
-        }
+    if (!picture.width || !picture.height) {
         return nullptr;
     }
-    return picture.ready ? make(picture, grey) : nullptr;
+    return make(picture, grey);
 }
 
 }  // namespace launcher

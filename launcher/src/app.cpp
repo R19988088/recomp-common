@@ -86,6 +86,19 @@ std::filesystem::path base_path() {
     return base ? std::filesystem::u8path(base) : std::filesystem::current_path();
 }
 
+// Where the Games page's pictures are: an `art` folder beside the launcher, or in a bundle's
+// Resources (Contents/MacOS/../Resources); where neither has one, the launcher's own folder (nothing is drawn).
+std::filesystem::path picture_folder() {
+    const std::filesystem::path base = base_path();
+    std::error_code error;
+    for (const std::filesystem::path& one : {base, base / ".." / "Resources"}) {
+        if (std::filesystem::is_directory(one / "art", error)) {
+            return std::filesystem::weakly_canonical(one, error);
+        }
+    }
+    return base;
+}
+
 void wake() {
     SDL_Event event{};
     event.type = SDL_EVENT_USER;
@@ -448,9 +461,9 @@ App::App(SDL_Window* window)
       program_folder_(base_path()),
       about_(the_description()) {
     prefs_.load();
-    // (the Games page's pictures: kept in the launcher's own folder, fetched once each)
-    if (collection_ && collection_->art_url && *collection_->art_url) {
-        art_ = std::make_unique<launcher::Art>(window_, folder_, collection_->art_url);
+    // (the Games page's pictures: an `art` folder beside the launcher, or in a bundle's Resources)
+    if (collection_) {
+        art_ = std::make_unique<launcher::Art>(window_, picture_folder());
     }
     // (controllers SDL doesn't know: gamecontrollerdb.txt beside the launcher or in its folder, as the game reads it)
     recomp::AddGamepadMappings({program_folder_, folder_});
@@ -579,7 +592,7 @@ bool App::busy() const {
         return true;
     }
 #endif
-    return finding_ || any_running() || (art_ && art_->working());
+    return finding_ || any_running();
 }
 
 bool App::ready_for_keys() const {

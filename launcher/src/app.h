@@ -333,8 +333,8 @@ private:
 
     const launcher::Collection* collection_ = nullptr;  // a collection's launcher's (a port's: none)
     SDL_Window* window_;
-    // The Games page's pictures (a collection whose Collection::art_url says one): made at the start, and destroyed
-    // before the window and its renderer go
+    // The Games page's pictures (a collection's): read from the `art` folder as tiles are first
+    // drawn, and destroyed before the window and its renderer go
     std::unique_ptr<launcher::Art> art_;
     int page_ = 0;
     std::filesystem::path folder_;          // the player's (a collection's: its own, with its launcher.ini)
