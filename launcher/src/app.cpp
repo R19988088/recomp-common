@@ -2205,6 +2205,123 @@ std::string App::room_game(size_t which) const {
     return collection_ || !about_.online.game ? slots_[which]->id : about_.online.game;
 }
 
+// The player's id in the waiting room, as launcher.ini keeps it: plain text, so that it is shown without asking the
+// service, stays the same across services, and may be typed in.
+std::string App::room_id() {
+    if (room_id_.empty()) {
+        room_id_ = prefs_.get("online", "id");
+        // (no id kept yet: made from a secret of the player's own, as the service makes it)
+        if (room_id_.size() != 12) {
+            if (prefs_.get("online", "room").size() != 32) {
+                prefs_.set("online", "room", launcher::new_room_secret());
+            }
+            room_id_ = launcher::room_id(prefs_.get("online", "room"));
+            if (room_id_.size() == 12) {
+                prefs_.set("online", "id", room_id_);
+                prefs_.save();
+            }
+        }
+    }
+    return room_id_;
+}
+
+void App::set_room_id(const std::string& id) {
+    std::string kept;
+    for (const char c : id) {
+        if (std::isxdigit(static_cast<unsigned char>(c)) && kept.size() < 12) {
+            kept += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+    }
+    if (kept.size() != 12 || kept == room_id()) {
+        return;
+    }
+    // (an id is what the service makes of a secret, so what was typed cannot simply be kept: a new secret is made,
+    // and the id shown is the one it gives)
+    room_id_.clear();
+    prefs_.set("online", "room", launcher::new_room_secret());
+    prefs_.set("online", "id", "");
+    prefs_.save();
+    room_id();
+    room_at_ = 0;  // (the room is asked again at once, so that the old id is not left in it)
+}
+
+std::filesystem::path App::online_state_path() const {
+    return folder_ / "online-state";
+}
+
+bool App::online_on() const {
+    return prefs_.get("online", "on") == "1";
+}
+
+size_t App::online_game() const {
+    const std::string id = prefs_.get("online", "on_game");
+    for (size_t which = 0; which < slots_.size(); which++) {
+        if (slots_[which]->id == id) {
+            return which;
+        }
+    }
+    return slots_.size();
+}
+
+// What the game reads when it starts: the switch, and whose it is, the player's name and id, and the room's. Written
+// whenever one of those changes; removed while online play is off.
+void App::write_online_state() {
+    static std::string written;
+    std::string text;
+    if (online_on()) {
+        const size_t which = online_game();
+        text = "1\n" + (which < slots_.size() ? slots_[which]->id : std::string()) + "\n" + prefs_.get("online", "name") + "\n" + room_id() + "\n" +
+               (room_url() ? room_url() : "");
+    }
+    if (text == written) {
+        return;
+    }
+    written = text;
+    std::error_code error;
+    if (text.empty()) {
+        std::filesystem::remove(online_state_path(), error);
+        return;
+    }
+    if (std::ofstream file(online_state_path(), std::ios::binary | std::ios::trunc); file) {
+        file << text;
+    }
+}
+
+void App::set_online_on(bool on, size_t which) {
+    if (on && which < slots_.size()) {
+        prefs_.set("online", "on_game", slots_[which]->id);
+    }
+    prefs_.set("online", "on", on ? "1" : "0");
+    prefs_.save();
+    write_online_state();
+    room_at_ = 0;  // (in the waiting room, or out, at once)
+}
+
+// An invitation accepted in the game: the file it left (`online-join`: the game's id, then the match's code)
+bool App::take_join_request(size_t* which, std::string* code) {
+    std::ifstream file(folder_ / "online-join", std::ios::binary);
+    if (!file) {
+        return false;
+    }
+    std::string id, match;
+    std::getline(file, id);
+    std::getline(file, match);
+    file.close();
+    std::error_code error;
+    std::filesystem::remove(folder_ / "online-join", error);
+    if (match.empty()) {
+        return false;
+    }
+    *which = slots_.size();
+    for (size_t n = 0; n < slots_.size(); n++) {
+        if (slots_[n]->id == id) {
+            *which = n;
+        }
+    }
+    *code = match;
+    return *which < slots_.size();
+}
+
 std::vector<std::string> App::host_arguments(const launcher::Online& online) const {
     std::vector<std::string> args = {online.host_argument};
     // (a match is in the lobby when the player has a name for it to be listed under; without one, only its code joins it)
@@ -2620,12 +2737,16 @@ void App::online_page(float width) {
 
 void App::follow_room(bool here) {
     const std::string url = room_url();
+    // (a game that is running is in the waiting room itself, on the one secret: the launcher neither checks in nor
+    // leaves while it does, or leaving would take the game out of the room)
+    const bool playing = any_running();
+    const bool checking_in = here && !playing;
     if (room_fetch_.valid() && room_fetch_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
         launcher::Room room = room_fetch_.get();
         room_at_ = SDL_GetTicks();
-        if (!room_in_) {
+        if (!checking_in) {
             // (left while it was asked: out again)
-            if (room.ok) {
+            if (room.ok && !playing) {
                 launcher::room_leave(url, prefs_.get("online", "room"));
             }
         } else if (room.ok) {
@@ -2643,6 +2764,12 @@ void App::follow_room(bool here) {
                 lobby_failed_ = false;
                 lobby_at_ = room_at_;
             }
+            // (the id the service made, kept: it is the one shown, and the game's)
+            if (room.id.size() == 12 && room.id != prefs_.get("online", "id")) {
+                room_id_ = room.id;
+                prefs_.set("online", "id", room.id);
+                prefs_.save();
+            }
             room_ = std::move(room);
         } else {
             room_.ok = false;
@@ -2652,12 +2779,12 @@ void App::follow_room(bool here) {
             }
         }
     }
-    if (!here) {
+    if (!checking_in) {
         if (room_in_) {
             room_in_ = false;
             room_ = {};
             room_at_ = 0;
-            if (!room_fetch_.valid()) {
+            if (!room_fetch_.valid() && !playing) {
                 launcher::room_leave(url, prefs_.get("online", "room"));
             }
         }
@@ -2667,11 +2794,8 @@ void App::follow_room(bool here) {
     if (room_fetch_.valid() || (room_at_ != 0 && SDL_GetTicks() - room_at_ < online_every())) {
         return;
     }
-    // (who this player is: a secret of their own, kept, from which the service makes their id)
-    if (prefs_.get("online", "room").size() != 32) {
-        prefs_.set("online", "room", launcher::new_room_secret());
-        prefs_.save();
-    }
+    // (who this player is: an id of their own, kept, from which the service makes theirs)
+    room_id();
     launcher::RoomCheckIn me;
     me.secret = prefs_.get("online", "room");
     me.name = online_name_;
