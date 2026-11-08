@@ -1780,10 +1780,19 @@ void App::sidebar(float height) {
         ui::text("Online play", Font::Regular, ui::size::kSmall, on ? p.accent : p.tertiary, px(inner) - px(40));
         if (switched) {
             if (on) {
+                // (off: the game, if it is the one running, leaves the room and stops hosting by itself: it reads the
+                // state file)
                 set_online_on(false, on_for < slots_.size() ? on_for : target);
-            } else if (target < slots_.size() && can_play(target)) {
-                set_online_on(true, target);
-                play(target, host_arguments(slots_[target]->about->online));
+            } else if (target < slots_.size()) {
+                if (slots_[target]->game.running()) {
+                    // (already playing: the switch alone starts the hosting, from the state file)
+                    set_online_on(true, target);
+                } else if (can_play(target)) {
+                    set_online_on(true, target);
+                    if (slots_[target]->about->online.host_argument) {
+                        play(target, host_arguments(slots_[target]->about->online));
+                    }
+                }
             }
         }
     }
