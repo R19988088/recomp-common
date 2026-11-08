@@ -403,6 +403,20 @@ int play_directly(const std::string& id, const std::vector<std::string>& extra) 
     std::vector<std::string> arguments = arguments_for(prefs, *target);
     // (the online switch on: it hosts from here too, as from Play, so a Steam shortcut starts a match. The switch is
     // for the game it names; with none named yet, it is for the first game played)
+    const std::string named = prefs.get("online", "on_game");
+    if (prefs.get("online", "on") == "1" && about.online.host_argument && (named.empty() || named == id)) {
+        arguments.push_back(about.online.host_argument);
+        if (about.online.name_argument && !prefs.get("online", "name").empty()) {
+            if (about.online.lobby && about.online.list_argument) {
+                arguments.push_back(about.online.list_argument);
+            }
+            arguments.push_back(about.online.name_argument);
+            arguments.push_back(prefs.get("online", "name"));
+        }
+        if (about.online.arcade_argument && prefs.get("online", "arcade") == "1") {
+            arguments.push_back(about.online.arcade_argument);
+        }
+    }
     arguments.insert(arguments.end(), extra.begin(), extra.end());
     if (!game.start(program_path(target->exe), arguments, target->folder, message, target->folder / "logs" / "game.log")) {
         say(SDL_MESSAGEBOX_ERROR, target->name, message);
