@@ -90,7 +90,6 @@ bool GameProcess::start(const std::filesystem::path& program, const std::vector<
         return false;
     }
     running_ = true;
-    process_ = 0;  // (the activity's: the app's own, stopped another way)
     waiter_ = std::thread([this] {
         JNIEnv* env = static_cast<JNIEnv*>(SDL_GetAndroidJNIEnv());  // (SDL attaches the thread)
         jint result = kStillRunning;
@@ -179,7 +178,6 @@ bool GameProcess::start(const std::filesystem::path& program, const std::vector<
         return false;
     }
     running_ = true;
-    process_ = pid;
     waiter_ = std::thread([this, pid] {
         int status = 0;
         waitpid(pid, &status, 0);
@@ -288,7 +286,6 @@ bool GameProcess::start(const std::filesystem::path& program, const std::vector<
     CloseHandle(process.hThread);
     running_ = true;
     HANDLE handle = process.hProcess;
-    process_ = reinterpret_cast<long long>(handle);
     waiter_ = std::thread([this, handle] {
         WaitForSingleObject(handle, INFINITE);
         DWORD code = 0;
