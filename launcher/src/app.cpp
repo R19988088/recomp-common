@@ -3054,10 +3054,12 @@ void App::room_card(float width, const std::vector<size_t>& playable) {
         });
     inset_separator(width);
     row(width, "Let others invite me",
-        (named ? std::string("While your ") + (collection_ ? "Online" : "Game") + " page is open, you're in the waiting room under "
-                 "your name, and others can invite you to a match. An invitation never interrupts a game: it waits here."
-               : std::string("With a name, you're in the waiting room while your ") + (collection_ ? "Online" : "Game") +
-                 " page is open, and others can invite you to a match.")
+        (named ? std::string("While online play is on (the switch at the foot of the sidebar) or your ") +
+                     (collection_ ? "Online" : "Game") +
+                     " page is open, you're in the waiting room under your name, and others can invite you to a match — "
+                     "playing too: the invitation is asked as a system dialog, and taking it starts the match."
+               : std::string("With a name, you're in the waiting room while the sidebar's online switch is on or your ") +
+                     (collection_ ? "Online" : "Game") + " page is open, and others can invite you to a match.")
             .c_str(),
         42.0f, 24.0f, [&] {
             if (ui::toggle("##online_invitable", invitable)) {
