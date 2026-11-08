@@ -54,6 +54,8 @@ float page_padding_top() {
     return narrow() ? 26.0f : 40.0f;
 }
 constexpr float kContentMaxWidth = 720.0f;
+// (the Games page's tiles: as many across as the window has room for, so this page is wider than the others')
+constexpr float kTilesMaxWidth = 1400.0f;
 constexpr size_t kAnyGame = static_cast<size_t>(-1);  // (a file or folder for whichever game takes it)
 
 void wake();
@@ -1823,7 +1825,10 @@ void App::page(float width, float height) {
     if (stick != 0.0f && !popup_was_open_) {
         ImGui::SetScrollY(std::clamp(ImGui::GetScrollY() + stick * px(1100) * ImGui::GetIO().DeltaTime, 0.0f, ImGui::GetScrollMaxY()));
     }
-    float content = std::min(width - px(page_padding_x()) * 2, px(kContentMaxWidth));
+    // (the Games page takes the room it has: its tiles are as wide as their column, and a wider window fits more of
+    // them across)
+    const bool tiles = own_page(page_) == Page::Library;
+    float content = std::min(width - px(page_padding_x()) * 2, tiles ? px(kTilesMaxWidth) : px(kContentMaxWidth));
     size_t which = 0;
     Page kind = own_page(page_, &which);
     slot_ = kind == Page::Title ? which : 0;
